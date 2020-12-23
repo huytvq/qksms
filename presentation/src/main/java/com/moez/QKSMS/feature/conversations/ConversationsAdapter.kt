@@ -20,33 +20,44 @@ package com.moez.QKSMS.feature.conversations
 
 import android.content.Context
 import android.graphics.Typeface
-import android.view.LayoutInflater
+import android.util.Log
+import android.view.View
 import android.view.ViewGroup
-import androidx.core.text.bold
 import androidx.core.text.buildSpannedString
 import androidx.core.text.color
-import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
+import androidx.recyclerview.widget.RecyclerView
 import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
 import com.moez.QKSMS.common.base.QkRealmAdapter
 import com.moez.QKSMS.common.base.QkViewHolder
 import com.moez.QKSMS.common.util.Colors
 import com.moez.QKSMS.common.util.DateFormatter
+import com.moez.QKSMS.common.util.extensions.forwardTouches
 import com.moez.QKSMS.common.util.extensions.resolveThemeColor
 import com.moez.QKSMS.common.util.extensions.setTint
+import com.moez.QKSMS.common.util.extensions.setVisible
+import com.moez.QKSMS.compat.SubscriptionManagerCompat
 import com.moez.QKSMS.databinding.ConversationListItemBinding
+import com.moez.QKSMS.feature.Constants
+import com.moez.QKSMS.feature.compose.BubbleUtils
+import com.moez.QKSMS.feature.compose.editing.PhoneNumberAdapter
 import com.moez.QKSMS.model.Conversation
 import com.moez.QKSMS.util.PhoneNumberUtils
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 class ConversationsAdapter @Inject constructor(
-    private val colors: Colors,
-    private val context: Context,
-    private val dateFormatter: DateFormatter,
-    private val navigator: Navigator,
-    private val phoneNumberUtils: PhoneNumberUtils
+        subscriptionManager: SubscriptionManagerCompat,
+        private val colors: Colors,
+        private val context: Context,
+        private val dateFormatter: DateFormatter,
+        private val navigator: Navigator,
+        private val phoneNumberUtils: PhoneNumberUtils
 ) : QkRealmAdapter<Conversation, ConversationListItemBinding>() {
+
+    private val subs = subscriptionManager.activeSubscriptionInfoList
+    private val numbersViewPool = RecyclerView.RecycledViewPool()
 
     init {
         // This is how we access the threadId for the swipe actions
@@ -90,6 +101,17 @@ class ConversationsAdapter @Inject constructor(
     override fun onBindViewHolder(holder: QkViewHolder<ConversationListItemBinding>, position: Int) {
         val conversation = getItem(position) ?: return
 
+        val next = if (position == itemCount - 1) null else getItem(position + 1)
+
+        holder.binding.numbers.setRecycledViewPool(numbersViewPool)
+        holder.binding.numbers.adapter = PhoneNumberAdapter()
+        holder.binding.numbers.forwardTouches(holder.binding.root)
+
+        (holder.binding.numbers.adapter as PhoneNumberAdapter).data = conversation.recipients
+                .mapNotNull { recipient -> recipient.contact }
+                .flatMap { contact -> contact.numbers }
+
+
         // If the last message wasn't incoming, then the colour doesn't really matter anyway
         val lastMessage = conversation.lastMessage
         val recipient = when {
@@ -99,6 +121,28 @@ class ConversationsAdapter @Inject constructor(
             }
         }
         val theme = colors.theme(recipient).theme
+
+
+        // Bind the timestamp
+        val timeSincePrevious = TimeUnit.MILLISECONDS.toMinutes((next?.date
+                ?: 0) - conversation.date)
+        val subscription = subs.find { sub -> sub.subscriptionId == conversation.id.toInt() }
+
+//        Log.d("TAG", "onBindViewHolder: " +conversation.date)
+
+//        Log.d("TAG", "onBindViewHolder: " + Constants.checkTwoDay(conversation.date ,(next?.date
+//                ?: 0)))
+        if (position <= 3) {
+//            if (position == 0) {
+                Log.d("TAG", "onBindViewHolder: " + Constants.getDisplayableTime(conversation.date, 0))
+//            } else {
+//                Log.d("TAG", "onBindViewHolder: " + Constants.getDisplayableTime((next?.date
+//                        ?: 0), conversation.date))
+//            }
+        }
+
+        holder.binding.dateHeader.setVisible(timeSincePrevious >= BubbleUtils.TIMESTAMP_THRESHOLD, View.INVISIBLE)
+//        holder.binding.dateHeader.setVisible(timeSincePrevious >= 50, View.INVISIBLE)
 
         holder.binding.root.isActivated = isSelected(conversation.id)
 
@@ -110,6 +154,7 @@ class ConversationsAdapter @Inject constructor(
                 color(theme) { append(" " + context.getString(R.string.main_draft)) }
             }
         }
+
         holder.binding.date.text = conversation.date.takeIf { it > 0 }?.let(dateFormatter::getConversationTimestamp)
         holder.binding.snippet.text = when {
             conversation.draft.isNotEmpty() -> conversation.draft

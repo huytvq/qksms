@@ -26,6 +26,7 @@ import android.text.Layout
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.StyleSpan
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -218,6 +219,8 @@ class MessagesAdapter @Inject constructor(
         // Bind the timestamp
         val timeSincePrevious = TimeUnit.MILLISECONDS.toMinutes(message.date - (previous?.date ?: 0))
         val subscription = subs.find { sub -> sub.subscriptionId == message.subId }
+
+            Log.d("TAG", "onBindViewHolder: " +position +": " +( message.date - (previous?.date ?: 0)))
 
         holder.binding.timestamp.text = dateFormatter.getMessageTimestamp(message.date)
         holder.binding.simIndex.text = subscription?.simSlotIndex?.plus(1)?.toString()

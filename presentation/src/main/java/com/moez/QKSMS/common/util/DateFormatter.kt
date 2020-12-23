@@ -56,6 +56,10 @@ class DateFormatter @Inject constructor(val context: Context) {
         return getFormatter("h:mm a").format(date)
     }
 
+    fun getFormatHeaderConversationTimestamp(date: Long): String {
+        return getFormatter("MMM \n dd").format(date)
+    }
+
     fun getMessageTimestamp(date: Long): String {
         val now = Calendar.getInstance()
         val then = Calendar.getInstance()

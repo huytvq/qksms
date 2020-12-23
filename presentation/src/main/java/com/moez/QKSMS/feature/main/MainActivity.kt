@@ -43,20 +43,17 @@ import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
 import com.moez.QKSMS.common.androidxcompat.drawerOpen
 import com.moez.QKSMS.common.base.QkThemedActivity
-import com.moez.QKSMS.common.util.extensions.autoScrollToStart
-import com.moez.QKSMS.common.util.extensions.dismissKeyboard
-import com.moez.QKSMS.common.util.extensions.resolveThemeColor
-import com.moez.QKSMS.common.util.extensions.scrapViews
-import com.moez.QKSMS.common.util.extensions.setBackgroundTint
-import com.moez.QKSMS.common.util.extensions.setTint
-import com.moez.QKSMS.common.util.extensions.setVisible
-import com.moez.QKSMS.common.util.extensions.viewBinding
+import com.moez.QKSMS.common.util.extensions.*
 import com.moez.QKSMS.databinding.MainActivityBinding
+import com.moez.QKSMS.feature.Constants
 import com.moez.QKSMS.feature.blocking.BlockingDialog
 import com.moez.QKSMS.feature.changelog.ChangelogDialog
+import com.moez.QKSMS.feature.conversations.ConversationAdapterNew
 import com.moez.QKSMS.feature.conversations.ConversationItemTouchCallback
+import com.moez.QKSMS.feature.conversations.ConversationNew
 import com.moez.QKSMS.feature.conversations.ConversationsAdapter
 import com.moez.QKSMS.manager.ChangelogManager
+import com.moez.QKSMS.model.Conversation
 import com.moez.QKSMS.repository.SyncRepository
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
@@ -65,18 +62,34 @@ import io.reactivex.Observable
 import io.reactivex.disposables.CompositeDisposable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
+import java.util.ArrayList
 import javax.inject.Inject
 
 class MainActivity : QkThemedActivity(), MainView {
 
-    @Inject lateinit var blockingDialog: BlockingDialog
-    @Inject lateinit var disposables: CompositeDisposable
-    @Inject lateinit var navigator: Navigator
-    @Inject lateinit var conversationsAdapter: ConversationsAdapter
-    @Inject lateinit var drawerBadgesExperiment: DrawerBadgesExperiment
-    @Inject lateinit var searchAdapter: SearchAdapter
-    @Inject lateinit var itemTouchCallback: ConversationItemTouchCallback
-    @Inject lateinit var viewModelFactory: ViewModelProvider.Factory
+    @Inject
+    lateinit var blockingDialog: BlockingDialog
+
+    @Inject
+    lateinit var disposables: CompositeDisposable
+
+    @Inject
+    lateinit var navigator: Navigator
+
+    @Inject
+    lateinit var conversationsAdapter: ConversationsAdapter
+
+    @Inject
+    lateinit var drawerBadgesExperiment: DrawerBadgesExperiment
+
+    @Inject
+    lateinit var searchAdapter: SearchAdapter
+
+    @Inject
+    lateinit var itemTouchCallback: ConversationItemTouchCallback
+
+    @Inject
+    lateinit var viewModelFactory: ViewModelProvider.Factory
 
     override val onNewIntentIntent: Subject<Intent> = PublishSubject.create()
     override val activityResumedIntent: Subject<Boolean> = PublishSubject.create()
@@ -121,6 +134,9 @@ class MainActivity : QkThemedActivity(), MainView {
     private val snackbar by lazy { findViewById<View>(R.id.snackbar) }
     private val syncing by lazy { findViewById<View>(R.id.syncing) }
     private val backPressedSubject: Subject<NavItem> = PublishSubject.create()
+
+    private var conversationList = arrayListOf<ConversationNew>()
+    private var conversations = arrayListOf<Conversation>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         AndroidInjection.inject(this)
@@ -237,12 +253,37 @@ class MainActivity : QkThemedActivity(), MainView {
         conversationsAdapter.emptyView = binding.empty.takeIf { state.page is Inbox || state.page is Archived }
         searchAdapter.emptyView = binding.empty.takeIf { state.page is Searching }
 
+        val adapter: ConversationAdapterNew = ConversationAdapterNew(this)
+
         when (state.page) {
             is Inbox -> {
                 showBackButton(state.page.selected > 0)
                 title = getString(R.string.main_title_selected, state.page.selected)
                 if (binding.recyclerView.adapter !== conversationsAdapter) binding.recyclerView.adapter = conversationsAdapter
                 conversationsAdapter.updateData(state.page.data)
+//                binding.recyclerView.adapter = adapter
+
+                Constants.getModelList(state.page.data)
+                if (conversationList.size > 0) {
+                    conversationList.clear()
+                }
+
+                for (i in 0 until Constants.conversationList.size) {
+                    if (i == 0) {
+                        conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                    } else {
+                        if (Constants.convertStringDate(Constants.conversationList[i].date) == Constants.convertStringDate(Constants.conversationList[i - 1].date)) {
+                            conversationList.add(ConversationNew(Constants.conversationList[i].date,
+                                    arrayListOf(Constants.conversationList[i]), Constants.conversationList[i], ConversationNew.TYPE_GROUP))
+                        } else {
+                            conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                        }
+                    }
+                }
+
+                binding.recyclerView.adapter = adapter
+                adapter.setData(conversationList)
+
                 itemTouchHelper.attachToRecyclerView(binding.recyclerView)
                 binding.empty.setText(R.string.inbox_empty_text)
             }
