@@ -20,9 +20,11 @@ package com.moez.QKSMS.feature.main
 
 import android.Manifest
 import android.animation.ObjectAnimator
+import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.res.ColorStateList
+import android.os.AsyncTask
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
@@ -43,17 +45,20 @@ import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
 import com.moez.QKSMS.common.androidxcompat.drawerOpen
 import com.moez.QKSMS.common.base.QkThemedActivity
+import com.moez.QKSMS.common.util.DateFormatter
 import com.moez.QKSMS.common.util.extensions.*
 import com.moez.QKSMS.databinding.MainActivityBinding
 import com.moez.QKSMS.feature.Constants
+import com.moez.QKSMS.feature.SharedPreferenceHelper
 import com.moez.QKSMS.feature.blocking.BlockingDialog
 import com.moez.QKSMS.feature.changelog.ChangelogDialog
 import com.moez.QKSMS.feature.conversations.ConversationAdapterNew
 import com.moez.QKSMS.feature.conversations.ConversationItemTouchCallback
 import com.moez.QKSMS.feature.conversations.ConversationNew
 import com.moez.QKSMS.feature.conversations.ConversationsAdapter
+import com.moez.QKSMS.feature.conversations.date.DateHeaderConversationAdapter
+import com.moez.QKSMS.feature.conversations.date.OnSelectedDateListener
 import com.moez.QKSMS.manager.ChangelogManager
-import com.moez.QKSMS.model.Conversation
 import com.moez.QKSMS.repository.SyncRepository
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
@@ -62,10 +67,12 @@ import io.reactivex.Observable
 import io.reactivex.disposables.CompositeDisposable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
-import java.util.ArrayList
+import java.util.*
 import javax.inject.Inject
+import kotlin.collections.LinkedHashSet
 
-class MainActivity : QkThemedActivity(), MainView {
+
+class MainActivity : QkThemedActivity(), MainView, OnSelectedDateListener {
 
     @Inject
     lateinit var blockingDialog: BlockingDialog
@@ -80,6 +87,9 @@ class MainActivity : QkThemedActivity(), MainView {
     lateinit var conversationsAdapter: ConversationsAdapter
 
     @Inject
+    lateinit var conversationAdapterNew: ConversationAdapterNew
+
+    @Inject
     lateinit var drawerBadgesExperiment: DrawerBadgesExperiment
 
     @Inject
@@ -90,6 +100,9 @@ class MainActivity : QkThemedActivity(), MainView {
 
     @Inject
     lateinit var viewModelFactory: ViewModelProvider.Factory
+
+    @Inject
+    lateinit var dateFormatter: DateFormatter
 
     override val onNewIntentIntent: Subject<Intent> = PublishSubject.create()
     override val activityResumedIntent: Subject<Boolean> = PublishSubject.create()
@@ -118,7 +131,7 @@ class MainActivity : QkThemedActivity(), MainView {
     override val plusBannerIntent by lazy { binding.drawer.plusBanner.clicks() }
     override val dismissRatingIntent by lazy { binding.drawer.rateDismiss.clicks() }
     override val rateIntent by lazy { binding.drawer.rateOkay.clicks() }
-    override val conversationsSelectedIntent by lazy { conversationsAdapter.selectionChanges }
+    override val conversationsSelectedIntent by lazy { conversationAdapterNew.selectionChanges }
     override val confirmDeleteIntent: Subject<List<Long>> = PublishSubject.create()
     override val swipeConversationIntent by lazy { itemTouchCallback.swipes }
     override val changelogMoreIntent by lazy { changelogDialog.moreClicks }
@@ -136,7 +149,14 @@ class MainActivity : QkThemedActivity(), MainView {
     private val backPressedSubject: Subject<NavItem> = PublishSubject.create()
 
     private var conversationList = arrayListOf<ConversationNew>()
-    private var conversations = arrayListOf<Conversation>()
+    private var dateList = arrayListOf<String>()
+    private var isSelected = 0
+    private var isSelectedArchived = 0
+    private var isCurrentDate: String = ""
+    private var isCurrentPositionDate: Int = 0
+    private var isMenuItemSelected: Boolean = false
+    private var isMenuItemSelectedArchived: Boolean = false
+    private var isClickDrawer: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         AndroidInjection.inject(this)
@@ -149,10 +169,14 @@ class MainActivity : QkThemedActivity(), MainView {
         binding.toolbar.setNavigationOnClickListener {
             dismissKeyboard()
             homeIntent.onNext(Unit)
+            isSelected = 0
+            isSelectedArchived = 0
+            isMenuItemSelected = false
+            isMenuItemSelectedArchived = false
         }
 
-        itemTouchCallback.adapter = conversationsAdapter
-        conversationsAdapter.autoScrollToStart(binding.recyclerView)
+//        itemTouchCallback.adapter = conversationAdapterNew
+        conversationAdapterNew.autoScrollToStart(binding.recyclerView)
 
         // Don't allow clicks to pass through the drawer layout
         binding.drawer.root.clicks().autoDisposable(scope()).subscribe()
@@ -192,6 +216,112 @@ class MainActivity : QkThemedActivity(), MainView {
         if (Build.VERSION.SDK_INT <= 22) {
             binding.toolbarSearch.setBackgroundTint(resolveThemeColor(R.attr.bubbleColor))
         }
+
+        //onClick
+        binding.cardSelected.setOnClickListener {
+            if (binding.cardSpinner.isVisible) {
+                binding.cardSpinner.isVisible = false
+            } else {
+                binding.cardSpinner.isVisible = true
+            }
+        }
+
+        onClick()
+    }
+
+    private fun onClick() {
+        binding.rootMain.setOnClickListener {
+            if (binding.cardSpinner.isVisible) {
+                binding.cardSpinner.isVisible = false
+            }
+        }
+        binding.timeDay.setOnClickListener {
+            onSortSelected(binding.timeDay.text.toString())
+        }
+        binding.timeWeek.setOnClickListener {
+            onSortSelected(binding.timeWeek.text.toString())
+        }
+        binding.timeMonth.setOnClickListener {
+            onSortSelected(binding.timeMonth.text.toString())
+        }
+        binding.timeYear.setOnClickListener {
+            onSortSelected(binding.timeYear.text.toString())
+        }
+    }
+
+    private fun onSortSelected(type: String) {
+        SharedPreferenceHelper.getInstance(this).set(Constants.TYPE_SORT, type)
+        binding.cardSpinner.isVisible = false
+        binding.typeSelected.text = SharedPreferenceHelper.getInstance(this).get(Constants.TYPE_SORT)
+
+        reLoaderData(SharedPreferenceHelper.getInstance(this).get(Constants.TYPE_SORT))
+    }
+
+    private fun reLoaderData(type: String?) {
+        if (conversationList.size > 0) {
+            conversationList.clear()
+        }
+
+        if (dateList.size > 0) {
+            dateList.clear()
+        }
+        if (Constants.conversationList.size > 0) {
+            for (i in 0 until Constants.conversationList.size) {
+                when (type) {
+                    "Dayly" -> {
+                        dateList.add(dateFormatter.getFormatHeaderConversationDay(Constants.conversationList[i].date))
+                    }
+                    "Monthly" -> {
+                        dateList.add(dateFormatter.getFormatHeaderConversationMonth(Constants.conversationList[i].date))
+                    }
+                    "Yearly" -> {
+                        dateList.add(dateFormatter.getFormatHeaderConversationYear(Constants.conversationList[i].date))
+                    }
+                    else -> {
+                        dateList.add(dateFormatter.getWeekOfYear(Constants.conversationList[i].date))
+                    }
+                }
+            }
+
+            //remove duplicate
+            val hashSet: LinkedHashSet<String> = LinkedHashSet(dateList)
+            val listDateDuplicates = ArrayList(hashSet)
+
+            isCurrentDate = listDateDuplicates[0].toString()
+
+            //
+            val headerDateAdapter = DateHeaderConversationAdapter(this, listDateDuplicates, this)
+            binding.recyclerViewDate.adapter = headerDateAdapter
+
+            for (i in 0 until Constants.conversationList.size) {
+                when (type) {
+                    "Dayly" -> {
+                        if (dateFormatter.getFormatHeaderConversationDay(Constants.conversationList[i].date) == listDateDuplicates[0]) {
+                            conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                        }
+                    }
+                    "Monthly" -> {
+                        if (dateFormatter.getFormatHeaderConversationMonth(Constants.conversationList[i].date) == listDateDuplicates[0]) {
+                            conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                        }
+                    }
+                    "Yearly" -> {
+                        if (dateFormatter.getFormatHeaderConversationYear(Constants.conversationList[i].date) == listDateDuplicates[0]) {
+                            conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                        }
+                    }
+                    else -> {
+                        if (dateFormatter.getWeekOfYear(Constants.conversationList[i].date) == listDateDuplicates[0]) {
+                            conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                        }
+                    }
+                }
+            }
+
+            binding.recyclerView.adapter = conversationAdapterNew
+            conversationAdapterNew.setData(conversationList, colors, phoneNumberUtils)
+            conversationAdapterNew.notifyDataSetChanged()
+        }
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -229,8 +359,8 @@ class MainActivity : QkThemedActivity(), MainView {
             else -> 0
         }
 
-        binding.toolbarSearch.setVisible(state.page is Inbox && state.page.selected == 0 || state.page is Searching)
-        binding.toolbarTitle.setVisible(binding.toolbarSearch.visibility != View.VISIBLE)
+//        binding.toolbarSearch.setVisible(state.page is Inbox && state.page.selected == 0 || state.page is Searching)
+        binding.toolbarTitle.setVisible(binding.toolbarSearch.visibility == View.VISIBLE)
 
         binding.toolbar.menu.findItem(R.id.archive)?.isVisible = state.page is Inbox && selectedConversations != 0
         binding.toolbar.menu.findItem(R.id.unarchive)?.isVisible = state.page is Archived && selectedConversations != 0
@@ -253,46 +383,167 @@ class MainActivity : QkThemedActivity(), MainView {
         conversationsAdapter.emptyView = binding.empty.takeIf { state.page is Inbox || state.page is Archived }
         searchAdapter.emptyView = binding.empty.takeIf { state.page is Searching }
 
-        val adapter: ConversationAdapterNew = ConversationAdapterNew(this)
-
         when (state.page) {
             is Inbox -> {
                 showBackButton(state.page.selected > 0)
-                title = getString(R.string.main_title_selected, state.page.selected)
-                if (binding.recyclerView.adapter !== conversationsAdapter) binding.recyclerView.adapter = conversationsAdapter
-                conversationsAdapter.updateData(state.page.data)
-//                binding.recyclerView.adapter = adapter
 
-                Constants.getModelList(state.page.data)
-                if (conversationList.size > 0) {
-                    conversationList.clear()
+                binding.recyclerViewDate.isVisible = true
+                binding.bgContent.isVisible = true
+                binding.empty.isVisible = false
+                binding.cardSelected.isVisible = true
+
+                if (state.page.selected > 0) {
+                    title = getString(R.string.main_title_selected, state.page.selected)
+                    binding.bgToolbar.isVisible = false
+                } else {
+                    title = "Messages"
+                    binding.bgToolbar.isVisible = true
                 }
 
-                for (i in 0 until Constants.conversationList.size) {
-                    if (i == 0) {
-                        conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                if (state.page.selected > 0) {
+                    isSelected = 1
+                }
+//                if (binding.recyclerView.adapter !== conversationsAdapter) binding.recyclerView.adapter = conversationsAdapter
+//                conversationsAdapter.updateData(state.page.data)
+//                binding.recyclerView.adapter = conversationsAdapter
+//                Constants.getModelList(state.page.data)
+
+                if (isSelected == 1 && isMenuItemSelected) {
+
+                    Constants.getModelList(state.page.data, false)
+                    val typeSort = SharedPreferenceHelper.getInstance(this).get(Constants.TYPE_SORT)
+
+                    if (conversationList.size > 0) {
+                        conversationList.clear()
+                    }
+
+                    if (dateList.size > 0) {
+                        dateList.clear()
+                    }
+                    if (Constants.conversationList.size > 0) {
+                        for (i in 0 until Constants.conversationList.size) {
+                            when (typeSort) {
+                                "Dayly" -> {
+                                    dateList.add(dateFormatter.getFormatHeaderConversationDay(Constants.conversationList[i].date))
+                                }
+                                "Monthly" -> {
+                                    dateList.add(dateFormatter.getFormatHeaderConversationMonth(Constants.conversationList[i].date))
+                                }
+                                "Yearly" -> {
+                                    dateList.add(dateFormatter.getFormatHeaderConversationYear(Constants.conversationList[i].date))
+                                }
+                                else -> {
+                                    dateList.add(dateFormatter.getWeekOfYear(Constants.conversationList[i].date))
+                                }
+                            }
+                        }
+
+                        //remove duplicate
+                        val hashSet: LinkedHashSet<String> = LinkedHashSet(dateList)
+                        val listDateDuplicates = ArrayList(hashSet)
+
+                        //
+                        val headerDateAdapter = DateHeaderConversationAdapter(this, listDateDuplicates, this)
+                        binding.recyclerViewDate.adapter = headerDateAdapter
+
+                        headerDateAdapter.setIndex(isCurrentPositionDate)
+//                    binding.recyclerViewDate.scrollToPosition(isCurrentPositionDate)
+
+                        onSelectedCurrent(typeSort, isCurrentDate)
+                    }
+                } else if (isSelected == 0) {
+                    if (isCurrentDate.isNotEmpty()) {
+                        Constants.getModelList(state.page.data, false)
+                        val typeSort = SharedPreferenceHelper.getInstance(this).get(Constants.TYPE_SORT)
+
+                        if (conversationList.size > 0) {
+                            conversationList.clear()
+                        }
+
+                        if (dateList.size > 0) {
+                            dateList.clear()
+                        }
+                        if (Constants.conversationList.size > 0) {
+                            for (i in 0 until Constants.conversationList.size) {
+                                when (typeSort) {
+                                    "Dayly" -> {
+                                        dateList.add(dateFormatter.getFormatHeaderConversationDay(Constants.conversationList[i].date))
+                                    }
+                                    "Monthly" -> {
+                                        dateList.add(dateFormatter.getFormatHeaderConversationMonth(Constants.conversationList[i].date))
+                                    }
+                                    "Yearly" -> {
+                                        dateList.add(dateFormatter.getFormatHeaderConversationYear(Constants.conversationList[i].date))
+                                    }
+                                    else -> {
+                                        dateList.add(dateFormatter.getWeekOfYear(Constants.conversationList[i].date))
+                                    }
+                                }
+                            }
+
+                            //remove duplicate
+                            val hashSet: LinkedHashSet<String> = LinkedHashSet(dateList)
+                            val listDateDuplicates = ArrayList(hashSet)
+
+                            //
+                            val headerDateAdapter = DateHeaderConversationAdapter(this, listDateDuplicates, this)
+                            binding.recyclerViewDate.adapter = headerDateAdapter
+
+                            headerDateAdapter.setIndex(isCurrentPositionDate)
+//                        binding.recyclerViewDate.scrollToPosition(isCurrentPositionDate)
+
+                            onSelectedCurrent(typeSort, isCurrentDate)
+                        }
                     } else {
-                        if (Constants.convertStringDate(Constants.conversationList[i].date) == Constants.convertStringDate(Constants.conversationList[i - 1].date)) {
-                            conversationList.add(ConversationNew(Constants.conversationList[i].date,
-                                    arrayListOf(Constants.conversationList[i]), Constants.conversationList[i], ConversationNew.TYPE_GROUP))
-                        } else {
-                            conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                        Constants.getModelList(state.page.data, false)
+                        SharedPreferenceHelper.getInstance(this).set(Constants.TYPE_SORT, "Weekly")
+                        binding.typeSelected.text = SharedPreferenceHelper.getInstance(this).get(Constants.TYPE_SORT)
+
+                        if (conversationList.size > 0) {
+                            conversationList.clear()
+                        }
+
+                        if (dateList.size > 0) {
+                            dateList.clear()
+                        }
+                        if (Constants.conversationList.size > 0) {
+                            for (i in 0 until Constants.conversationList.size) {
+                                dateList.add(dateFormatter.getWeekOfYear(Constants.conversationList[i].date))
+                            }
+
+                            //remove duplicate
+                            val hashSet: LinkedHashSet<String> = LinkedHashSet(dateList)
+                            val listDateDuplicates = ArrayList(hashSet)
+
+                            //
+                            val headerDateAdapter = DateHeaderConversationAdapter(this, listDateDuplicates, this)
+                            binding.recyclerViewDate.adapter = headerDateAdapter
+
+                            for (i in 0 until Constants.conversationList.size) {
+                                if (dateFormatter.getWeekOfYear(Constants.conversationList[i].date) == listDateDuplicates[0]) {
+                                    isCurrentDate = listDateDuplicates[0].toString()
+                                    conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                                }
+                            }
+
+                            if (binding.recyclerView.adapter !== conversationAdapterNew) binding.recyclerView.adapter = conversationAdapterNew
+//                    binding.recyclerView.adapter = conversationAdapterNew
+                            conversationAdapterNew.setData(conversationList, colors, phoneNumberUtils)
+                            conversationAdapterNew.notifyDataSetChanged()
                         }
                     }
                 }
 
-                binding.recyclerView.adapter = adapter
-                adapter.setData(conversationList)
-
-                itemTouchHelper.attachToRecyclerView(binding.recyclerView)
+//                itemTouchHelper.attachToRecyclerView(binding.recyclerView)
                 binding.empty.setText(R.string.inbox_empty_text)
+                binding.cardListConversation.isVisible = !binding.empty.isVisible
             }
 
             is Searching -> {
                 showBackButton(true)
                 if (binding.recyclerView.adapter !== searchAdapter) binding.recyclerView.adapter = searchAdapter
                 searchAdapter.data = state.page.data ?: listOf()
-                itemTouchHelper.attachToRecyclerView(null)
+//                itemTouchHelper.attachToRecyclerView(null)
                 binding.empty.setText(R.string.inbox_search_empty_text)
             }
 
@@ -302,10 +553,165 @@ class MainActivity : QkThemedActivity(), MainView {
                     true -> getString(R.string.main_title_selected, state.page.selected)
                     false -> getString(R.string.title_archived)
                 }
-                if (binding.recyclerView.adapter !== conversationsAdapter) binding.recyclerView.adapter = conversationsAdapter
-                conversationsAdapter.updateData(state.page.data)
-                itemTouchHelper.attachToRecyclerView(null)
-                binding.empty.setText(R.string.archived_empty_text)
+
+                binding.bgToolbar.isVisible = state.page.selected <= 0
+
+                if (state.page.selected > 0) {
+                    isSelectedArchived = 1
+                }
+//                if (binding.recyclerView.adapter !== conversationsAdapter) binding.recyclerView.adapter = conversationsAdapter
+//                conversationsAdapter.updateData(state.page.data)
+//                binding.recyclerView.adapter = conversationsAdapter
+//                Constants.getModelList(state.page.data)
+
+                if (isSelectedArchived == 1 && isMenuItemSelectedArchived) {
+
+                    Constants.getModelList(state.page.data, true)
+                    val typeSort = SharedPreferenceHelper.getInstance(this).get(Constants.TYPE_SORT)
+
+                    if (conversationList.size > 0) {
+                        conversationList.clear()
+                    }
+
+                    if (dateList.size > 0) {
+                        dateList.clear()
+                    }
+                    if (Constants.conversationList.size > 0) {
+                        for (i in 0 until Constants.conversationList.size) {
+                            when (typeSort) {
+                                "Dayly" -> {
+                                    dateList.add(dateFormatter.getFormatHeaderConversationDay(Constants.conversationList[i].date))
+                                }
+                                "Monthly" -> {
+                                    dateList.add(dateFormatter.getFormatHeaderConversationMonth(Constants.conversationList[i].date))
+                                }
+                                "Yearly" -> {
+                                    dateList.add(dateFormatter.getFormatHeaderConversationYear(Constants.conversationList[i].date))
+                                }
+                                else -> {
+                                    dateList.add(dateFormatter.getWeekOfYear(Constants.conversationList[i].date))
+                                }
+                            }
+                        }
+
+                        //remove duplicate
+                        val hashSet: LinkedHashSet<String> = LinkedHashSet(dateList)
+                        val listDateDuplicates = ArrayList(hashSet)
+
+                        //
+                        val headerDateAdapter = DateHeaderConversationAdapter(this, listDateDuplicates, this)
+                        binding.recyclerViewDate.adapter = headerDateAdapter
+
+                        headerDateAdapter.setIndex(isCurrentPositionDate)
+//                    binding.recyclerViewDate.scrollToPosition(isCurrentPositionDate)
+
+                        onSelectedCurrent(typeSort, isCurrentDate)
+                    } else {
+                        binding.recyclerViewDate.isVisible = false
+                        binding.bgContent.isVisible = false
+                        binding.empty.isVisible = true
+                        binding.empty.setText(R.string.inbox_empty_text)
+                        binding.cardSelected.isVisible = false
+                    }
+                } else if (isSelectedArchived == 0) {
+                    if (isCurrentDate.isNotEmpty()) {
+                        Constants.getModelList(state.page.data, true)
+                        val typeSort = SharedPreferenceHelper.getInstance(this).get(Constants.TYPE_SORT)
+
+                        if (conversationList.size > 0) {
+                            conversationList.clear()
+                        }
+
+                        if (dateList.size > 0) {
+                            dateList.clear()
+                        }
+                        if (Constants.conversationList.size > 0) {
+                            for (i in 0 until Constants.conversationList.size) {
+                                when (typeSort) {
+                                    "Dayly" -> {
+                                        dateList.add(dateFormatter.getFormatHeaderConversationDay(Constants.conversationList[i].date))
+                                    }
+                                    "Monthly" -> {
+                                        dateList.add(dateFormatter.getFormatHeaderConversationMonth(Constants.conversationList[i].date))
+                                    }
+                                    "Yearly" -> {
+                                        dateList.add(dateFormatter.getFormatHeaderConversationYear(Constants.conversationList[i].date))
+                                    }
+                                    else -> {
+                                        dateList.add(dateFormatter.getWeekOfYear(Constants.conversationList[i].date))
+                                    }
+                                }
+                            }
+
+                            //remove duplicate
+                            val hashSet: LinkedHashSet<String> = LinkedHashSet(dateList)
+                            val listDateDuplicates = ArrayList(hashSet)
+
+                            //
+                            val headerDateAdapter = DateHeaderConversationAdapter(this, listDateDuplicates, this)
+                            binding.recyclerViewDate.adapter = headerDateAdapter
+
+                            headerDateAdapter.setIndex(isCurrentPositionDate)
+//                        binding.recyclerViewDate.scrollToPosition(isCurrentPositionDate)
+
+                            onSelectedCurrent(typeSort, isCurrentDate)
+                        }else {
+                            binding.recyclerViewDate.isVisible = false
+                            binding.bgContent.isVisible = false
+                            binding.empty.isVisible = true
+                            binding.empty.setText(R.string.inbox_empty_text)
+                            binding.cardSelected.isVisible = false
+                        }
+                    } else {
+                        Constants.getModelList(state.page.data, true)
+                        SharedPreferenceHelper.getInstance(this).set(Constants.TYPE_SORT, "Weekly")
+                        binding.typeSelected.text = SharedPreferenceHelper.getInstance(this).get(Constants.TYPE_SORT)
+
+                        if (conversationList.size > 0) {
+                            conversationList.clear()
+                        }
+
+                        if (dateList.size > 0) {
+                            dateList.clear()
+                        }
+                        if (Constants.conversationList.size > 0) {
+                            for (i in 0 until Constants.conversationList.size) {
+                                dateList.add(dateFormatter.getWeekOfYear(Constants.conversationList[i].date))
+                            }
+
+                            //remove duplicate
+                            val hashSet: LinkedHashSet<String> = LinkedHashSet(dateList)
+                            val listDateDuplicates = ArrayList(hashSet)
+
+                            //
+                            val headerDateAdapter = DateHeaderConversationAdapter(this, listDateDuplicates, this)
+                            binding.recyclerViewDate.adapter = headerDateAdapter
+
+                            for (i in 0 until Constants.conversationList.size) {
+                                if (dateFormatter.getWeekOfYear(Constants.conversationList[i].date) == listDateDuplicates[0]) {
+                                    isCurrentDate = listDateDuplicates[0].toString()
+                                    conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                                }
+                            }
+
+                            if (binding.recyclerView.adapter !== conversationAdapterNew) binding.recyclerView.adapter = conversationAdapterNew
+//                    binding.recyclerView.adapter = conversationAdapterNew
+                            conversationAdapterNew.setData(conversationList, colors, phoneNumberUtils)
+                            conversationAdapterNew.notifyDataSetChanged()
+                        }else {
+                            binding.recyclerViewDate.isVisible = false
+                            binding.bgContent.isVisible = false
+                            binding.empty.isVisible = true
+                            binding.empty.setText(R.string.inbox_empty_text)
+                            binding.cardSelected.isVisible = false
+                        }
+                    }
+                }
+
+//                itemTouchHelper.attachToRecyclerView(binding.recyclerView)
+                binding.empty.setText(R.string.inbox_empty_text)
+                binding.cardListConversation.isVisible = !binding.empty.isVisible
+
             }
         }
 
@@ -394,7 +800,9 @@ class MainActivity : QkThemedActivity(), MainView {
     }
 
     override fun clearSelection() {
-        conversationsAdapter.clearSelection()
+        conversationAdapterNew.clearSelection()
+        isMenuItemSelected = false
+        isMenuItemSelectedArchived = false
     }
 
     override fun themeChanged() {
@@ -434,6 +842,9 @@ class MainActivity : QkThemedActivity(), MainView {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         optionsItemIntent.onNext(item.itemId)
+        isMenuItemSelected = true
+        isMenuItemSelectedArchived = true
+
         return true
     }
 
@@ -441,4 +852,97 @@ class MainActivity : QkThemedActivity(), MainView {
         backPressedSubject.onNext(NavItem.BACK)
     }
 
+    override fun onSelected(position: Int, date: String?) {
+        isCurrentDate = date.toString()
+        isCurrentPositionDate = position
+
+        if (conversationList.size > 0) {
+            conversationList.clear()
+        }
+
+//        object : AsyncTask<Void?, Void?, Void?>() {
+//            override fun doInBackground(vararg params: Void?): Void? {
+                for (i in 0 until Constants.conversationList.size) {
+                    when (SharedPreferenceHelper.getInstance(this@MainActivity).get(Constants.TYPE_SORT)) {
+                        "Dayly" -> {
+                            if (dateFormatter.getFormatHeaderConversationDay(Constants.conversationList[i].date) == date) {
+                                conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                            }
+                        }
+                        "Monthly" -> {
+                            if (dateFormatter.getFormatHeaderConversationMonth(Constants.conversationList[i].date) == date) {
+                                conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                            }
+                        }
+                        "Yearly" -> {
+                            if (dateFormatter.getFormatHeaderConversationYear(Constants.conversationList[i].date) == date) {
+                                conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                            }
+                        }
+                        else -> {
+                            if (dateFormatter.getWeekOfYear(Constants.conversationList[i].date) == date) {
+                                conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                            }
+                        }
+                    }
+                }
+//                return null
+//            }
+
+//            override fun onPostExecute(result: Void?) {
+//                super.onPostExecute(result)
+                binding.recyclerView.adapter = conversationAdapterNew
+                conversationAdapterNew.setData(conversationList, colors, phoneNumberUtils)
+                conversationAdapterNew.notifyDataSetChanged()
+//            }
+//        }.execute()
+    }
+
+
+    private fun onSelectedCurrent(type: String, date: String?) {
+        if (conversationList.size > 0) {
+            conversationList.clear()
+        }
+
+//        @SuppressLint ("StaticFieldLeak")
+//        object : AsyncTask<Void?, Void?, Void?>() {
+//            override fun doInBackground(vararg params: Void?): Void? {
+                if (Constants.conversationList.size > 0) {
+                    for (i in 0 until Constants.conversationList.size) {
+                        when (type) {
+                            "Dayly" -> {
+                                if (dateFormatter.getFormatHeaderConversationDay(Constants.conversationList[i].date) == date) {
+                                    conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                                }
+                            }
+                            "Monthly" -> {
+                                if (dateFormatter.getFormatHeaderConversationMonth(Constants.conversationList[i].date) == date) {
+                                    conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                                }
+                            }
+                            "Yearly" -> {
+                                if (dateFormatter.getFormatHeaderConversationYear(Constants.conversationList[i].date) == date) {
+                                    conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                                }
+                            }
+                            else -> {
+                                if (dateFormatter.getWeekOfYear(Constants.conversationList[i].date) == date) {
+                                    conversationList.add(ConversationNew(Constants.conversationList[i].date, null, Constants.conversationList[i], ConversationNew.TYPE_NONE))
+                                }
+                            }
+                        }
+                    }
+                }
+//                return null
+//            }
+
+//            override fun onPostExecute(result: Void?) {
+//                super.onPostExecute(result)
+//                binding.recyclerView.adapter = conversationAdapterNew
+                if (binding.recyclerView.adapter !== conversationAdapterNew) binding.recyclerView.adapter = conversationAdapterNew
+                conversationAdapterNew.setData(conversationList, colors, phoneNumberUtils)
+                conversationAdapterNew.notifyDataSetChanged()
+//            }
+//        }.execute()
+    }
 }

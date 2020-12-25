@@ -56,8 +56,28 @@ class DateFormatter @Inject constructor(val context: Context) {
         return getFormatter("h:mm a").format(date)
     }
 
-    fun getFormatHeaderConversationTimestamp(date: Long): String {
-        return getFormatter("MMM \n dd").format(date)
+    fun getFormatHeaderConversationDay(date: Long): String {
+        return getFormatter("dd MMM yyyy").format(date)
+    }
+
+    fun getFormatHeaderConversationWeek(date: Long): String {
+        return getFormatter("EEE MMM").format(date)
+    }
+
+    fun getWeekOfYear(timeDate: Long): String {
+        val year = getFormatHeaderConversationYear(timeDate)
+        val date = Date(timeDate)
+        val c = Calendar.getInstance()
+        c.time = date
+        return "Week " + c[Calendar.WEEK_OF_YEAR].toString() + ", " + year
+    }
+
+    fun getFormatHeaderConversationMonth(date: Long): String {
+        return getFormatter("MMM yyyy").format(date)
+    }
+
+    fun getFormatHeaderConversationYear(date: Long): String {
+        return getFormatter("yyyy").format(date)
     }
 
     fun getMessageTimestamp(date: Long): String {

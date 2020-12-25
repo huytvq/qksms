@@ -1,5 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
+<?xml version="1.0" encoding="utf-8"?><!--
   ~ Copyright (C) 2019 Moez Bhatti <moez.bhatti@gmail.com>
   ~
   ~ This file is part of QKSMS.
@@ -27,7 +26,13 @@
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:animateLayoutChanges="true">
+        android:animateLayoutChanges="true"
+        android:background="@drawable/bg_main_gradient">
+
+        <View
+            android:id="@+id/rootMain"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
 
         <androidx.appcompat.widget.Toolbar
             android:id="@+id/toolbar"
@@ -35,6 +40,7 @@
             android:animateLayoutChanges="true"
             android:focusable="true"
             android:focusableInTouchMode="true"
+            android:gravity="right"
             app:contentInsetStartWithNavigation="0dp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
@@ -60,6 +66,7 @@
                 android:paddingStart="16dp"
                 android:paddingEnd="16dp"
                 android:textColorHint="?android:attr/textColorTertiary"
+                android:visibility="gone"
                 app:textSize="primary"
                 tools:textSize="16sp" />
 
@@ -78,18 +85,52 @@
             tools:text="Your conversations will appear here"
             tools:visibility="invisible" />
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recyclerView"
-            android:layout_width="match_parent"
+        <RelativeLayout
+            android:id="@+id/bgContent"
+            android:layout_width="0dp"
             android:layout_height="0dp"
-            android:clipChildren="false"
-            android:clipToPadding="false"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp"
+            app:layout_constraintBottom_toBottomOf="@id/bottom"
+            app:layout_constraintLeft_toRightOf="@id/recyclerViewDate"
+            app:layout_constraintRight_toRightOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/toolbar">
+
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardListConversation"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="20dp"
+                android:clipChildren="false"
+                android:visibility="gone"
+                tools:visibility="visible"
+                android:clipToPadding="false"
+                android:paddingTop="40dp"
+                app:cardCornerRadius="10dp"
+                app:cardElevation="5dp">
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recyclerView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:clickable="false"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+                    tools:listitem="@layout/conversation_list_item" />
+
+            </androidx.cardview.widget.CardView>
+
+        </RelativeLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerViewDate"
+            android:layout_width="wrap_content"
+            android:layout_height="0dp"
+            android:background="?android:attr/windowBackground"
             app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
-            app:layout_constraintBottom_toTopOf="@id/bottom"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintLeft_toLeftOf="parent"
             app:layout_constraintTop_toBottomOf="@id/toolbar"
-            tools:listitem="@layout/conversation_list_item" />
+            tools:listitem="@layout/item_header_date_conversation" />
 
         <ImageView
             android:id="@+id/compose"
@@ -136,6 +177,125 @@
             android:layout_height="wrap_content"
             android:visibility="gone"
             app:layout_constraintBottom_toBottomOf="parent" />
+
+        <LinearLayout
+            android:id="@+id/bgToolbar"
+            android:layout_width="wrap_content"
+            android:layout_height="0dp"
+            android:visibility="visible"
+            app:layout_constraintRight_toRightOf="parent"
+            app:layout_constraintBottom_toBottomOf="@id/toolbar"
+            android:gravity="center_vertical"
+            app:layout_constraintTop_toTopOf="@id/toolbar">
+
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardSelected"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:visibility="visible"
+                android:layout_marginRight="20dp"
+                android:layout_marginLeft="10dp"
+                app:cardCornerRadius="5dp">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginLeft="13dp"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginRight="13dp"
+                    android:layout_marginBottom="8dp"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/typeSelected"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Weekly"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="18sp" />
+
+                    <ImageView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:src="@drawable/ic_keyboard_arrow_down_black_24dp"
+                        android:tint="?android:attr/textColorPrimary" />
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+        </LinearLayout>
+
+        <androidx.cardview.widget.CardView
+            android:id="@+id/cardSpinner"
+            android:layout_width="150dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:layout_margin="10dp"
+            android:visibility="gone"
+            app:cardCornerRadius="5dp"
+            app:cardElevation="5dp"
+            app:layout_constraintRight_toRightOf="@id/bgToolbar"
+            app:layout_constraintTop_toTopOf="@id/bgToolbar">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/timeDay"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingLeft="20dp"
+                    android:paddingTop="10dp"
+                    android:paddingRight="10dp"
+                    android:paddingBottom="10dp"
+                    android:text="Dayly"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="18sp" />
+
+                <TextView
+                    android:id="@+id/timeWeek"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingLeft="20dp"
+                    android:paddingTop="10dp"
+                    android:paddingRight="10dp"
+                    android:paddingBottom="10dp"
+                    android:text="Weekly"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="18sp" />
+
+                <TextView
+                    android:id="@+id/timeMonth"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingLeft="20dp"
+                    android:paddingTop="10dp"
+                    android:paddingRight="10dp"
+                    android:paddingBottom="10dp"
+                    android:text="Monthly"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="18sp" />
+
+                <TextView
+                    android:id="@+id/timeYear"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingLeft="20dp"
+                    android:paddingTop="10dp"
+                    android:paddingRight="10dp"
+                    android:paddingBottom="10dp"
+                    android:text="Yearly"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="18sp" />
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

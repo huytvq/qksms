@@ -5,7 +5,8 @@ import com.moez.QKSMS.model.Conversation;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
 
 import io.realm.Realm;
@@ -13,9 +14,11 @@ import io.realm.RealmResults;
 
 public class Constants {
 
+    public static final String TYPE_SORT = "TYPE_SORT";
+
     public static List<Conversation> conversationList = new ArrayList<>();
 
-    public static List<Conversation> getModelList(RealmResults<Conversation> conversations) {
+    public static List<Conversation> getModelList(RealmResults<Conversation> conversations, boolean isArchived) {
         List<Conversation> list = new ArrayList<>();
         Realm realm = null;
         try {
@@ -29,13 +32,23 @@ public class Constants {
                 realm.close();
             }
         }
+
         if (conversationList.size() > 0) {
             conversationList.clear();
         }
-        conversationList.addAll(list);
+        for (int i = 0; i < list.size(); i++) {
+            if (isArchived) {
+                if (list.get(i).getArchived() && list.get(i).getLastMessage() != null) {
+                    conversationList.add(list.get(i));
+                }
+            } else {
+                if (!list.get(i).getArchived() && !list.get(i).getBlocked() && list.get(i).getLastMessage() != null) {
+                    conversationList.add(list.get(i));
+                }
+            }
+        }
         return list;
     }
-
 
     public static boolean checkTwoDay(long dateStart, long dateNext) {
         long difference = 0;
@@ -120,5 +133,11 @@ public class Constants {
 ////            }
 //        }
 //        return null;
+    }
+
+    public static int getWeekOfYear(Date date) {
+        Calendar c = Calendar.getInstance();
+        c.setTime(date);
+        return c.get(Calendar.WEEK_OF_YEAR);
     }
 }
